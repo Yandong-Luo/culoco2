@@ -64,7 +64,22 @@ class CudaRobotGeneratorConfig:
     base_link: str
 
     #: Name of end-effector link to compute pose.
-    ee_link: str
+    ee_link: Optional[str] = None
+    
+    # =========================== For multiple end effector ##########################
+    #: enable multi-chain
+    enable_multi_chain: bool = True
+    
+    #: Name of all end-effector link to compute pose.
+    ee_links: Optional[List[str]] = None
+    
+    #: leg ee links
+    leg_ee_links: Optional[List[str]] = None
+    
+    #: arm ee link
+    arm_ee_link: Optional[str] = None
+    
+    ##################################################################################
 
     #: Device to load cuda robot model.
     tensor_args: TensorDeviceType = TensorDeviceType()
@@ -202,12 +217,24 @@ class CudaRobotGeneratorConfig:
                 for i in self.mesh_link_names:
                     if i not in self.link_names:
                         self.link_names.append(i)
+        # if self.link_names is None:
+        #     self.link_names = [self.ee_link]
         if self.link_names is None:
-            self.link_names = [self.ee_link]
+            if self.enable_multi_chain:
+                self.link_names = copy.deepcopy(self.ee_links)
+            else:
+                self.link_names = [self.ee_link]
         if self.collision_link_names is None:
             self.collision_link_names = []
-        if self.ee_link not in self.link_names:
-            self.link_names.append(self.ee_link)
+        # if self.ee_link not in self.link_names:
+        #     self.link_names.append(self.ee_link)
+        if self.enable_multi_chain == False:
+            if self.ee_link not in self.link_names:
+                self.link_names.append(self.ee_link)
+        else:
+            for ee_link in self.ee_links:
+                if ee_link not in self.link_names:
+                    self.link_names.append(ee_link)
         if self.collision_spheres is not None:
             if isinstance(self.collision_spheres, str):
                 coll_yml = join_path(robot_path, self.collision_spheres)
@@ -331,12 +358,23 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
                 load_meshes=self.load_meshes,
             )
 
-        if self.lock_joints is None:
-            self._build_kinematics(self.base_link, self.ee_link, other_links, self.link_names)
+        if self.enable_multi_chain == False:
+            if self.lock_joints is None:
+                self._build_kinematics(self.base_link, self.ee_link, other_links, self.link_names)
+            else:
+                self._build_kinematics_with_lock_joints(
+                    self.base_link, self.ee_link, other_links, self.link_names, self.lock_joints
+                )
         else:
-            self._build_kinematics_with_lock_joints(
-                self.base_link, self.ee_link, other_links, self.link_names, self.lock_joints
-            )
+            if self.lock_joints is None:
+                self._build_multi_chain_kinematics(self.base_link, self.ee_links, other_links, self.link_names)
+            else:
+                # self._build_kinematics_with_lock_joints(
+                #     self.base_link, self.ee_link, other_links, self.link_names, self.lock_joints
+                # )
+                self._build_multi_kinematics_with_lock_joints(
+                    self.base_link, self.ee_links, other_links, self.link_names, self.lock_joints
+                )
         if self.cspace is None:
             jpv = self._get_joint_position_velocity_limits()
             self.cspace = CSpaceConfig.load_from_joint_limits(
@@ -345,35 +383,74 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
 
         self.cspace.inplace_reindex(self.joint_names)
         self._update_joint_limits()
-        self._ee_idx = self.link_names.index(self.ee_link)
+        self._mutli_ee_idx = [-1] * len(self.ee_links)
+        if self.enable_multi_chain:
+            for i, ee_link in enumerate(self.ee_links):
+                # print(self.link_names)
+                # print(i, ee_link)
+                # print(self.link_names.index(ee_link))
+                self._mutli_ee_idx[i] = self.link_names.index(ee_link)
+                # print(i,self.link_names.index(ee_link))
+        else:
+            self._ee_idx = self.link_names.index(self.ee_link)
 
         # create kinematics tensor:
-        self._kinematics_config = KinematicsTensorConfig(
-            fixed_transforms=self._fixed_transform,
-            link_map=self._link_map,
-            joint_map=self._joint_map,
-            joint_map_type=self._joint_map_type,
-            joint_offset_map=self._joint_offset_map,
-            store_link_map=self._store_link_map,
-            link_chain_map=self._link_chain_map,
-            link_names=self.link_names,
-            link_spheres=self._link_spheres_tensor,
-            link_sphere_idx_map=self._link_sphere_idx_map,
-            n_dof=self._n_dofs,
-            joint_limits=self._joint_limits,
-            non_fixed_joint_names=self.non_fixed_joint_names,
-            total_spheres=self.total_spheres,
-            link_name_to_idx_map=self._name_to_idx_map,
-            joint_names=self.joint_names,
-            debug=self.debug,
-            ee_idx=self._ee_idx,
-            mesh_link_names=self.mesh_link_names,
-            cspace=self.cspace,
-            base_link=self.base_link,
-            ee_link=self.ee_link,
-            lock_jointstate=self.lock_jointstate,
-            mimic_joints=self._mimic_joint_data,
-        )
+        if self.enable_multi_chain == False:
+            self._kinematics_config = KinematicsTensorConfig(
+                fixed_transforms=self._fixed_transform,
+                link_map=self._link_map,
+                joint_map=self._joint_map,
+                joint_map_type=self._joint_map_type,
+                joint_offset_map=self._joint_offset_map,
+                store_link_map=self._store_link_map,
+                link_chain_map=self._link_chain_map,
+                link_names=self.link_names,
+                link_spheres=self._link_spheres_tensor,
+                link_sphere_idx_map=self._link_sphere_idx_map,
+                n_dof=self._n_dofs,
+                joint_limits=self._joint_limits,
+                non_fixed_joint_names=self.non_fixed_joint_names,
+                total_spheres=self.total_spheres,
+                link_name_to_idx_map=self._name_to_idx_map,
+                joint_names=self.joint_names,
+                debug=self.debug,
+                ee_idx=self._ee_idx,
+                mesh_link_names=self.mesh_link_names,
+                cspace=self.cspace,
+                base_link=self.base_link,
+                ee_link=self.ee_link,
+                lock_jointstate=self.lock_jointstate,
+                mimic_joints=self._mimic_joint_data,
+            )
+        else:
+            # create kinematics tensor:
+            self._kinematics_config = KinematicsTensorConfig(
+                fixed_transforms=self._fixed_transform,
+                link_map=self._link_map,
+                joint_map=self._joint_map,
+                joint_map_type=self._joint_map_type,
+                joint_offset_map=self._joint_offset_map,
+                store_link_map=self._store_link_map,
+                link_chain_map=self._link_chain_map,
+                link_names=self.link_names,
+                link_spheres=self._link_spheres_tensor,
+                link_sphere_idx_map=self._link_sphere_idx_map,
+                n_dof=self._n_dofs,
+                joint_limits=self._joint_limits,
+                non_fixed_joint_names=self.non_fixed_joint_names,
+                total_spheres=self.total_spheres,
+                link_name_to_idx_map=self._name_to_idx_map,
+                joint_names=self.joint_names,
+                debug=self.debug,
+                # ee_idx=self._ee_idx,
+                ee_links=self.ee_links,
+                mesh_link_names=self.mesh_link_names,
+                cspace=self.cspace,
+                base_link=self.base_link,
+                ee_link=self.ee_link,
+                lock_jointstate=self.lock_jointstate,
+                mimic_joints=self._mimic_joint_data,
+            )
         if self.asset_root_path is not None and self.asset_root_path != "":
             self._kinematics_parser.add_absolute_path_to_link_meshes(self.asset_root_path)
 
@@ -454,6 +531,69 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
             if i in self._name_to_idx_map:
                 continue
             if i not in self.extra_links.keys():
+                chain_l_names = self._kinematics_parser.get_chain(base_link, i)
+
+                for k in chain_l_names:
+                    if k in chain_link_names:
+                        continue
+                    # if link name is not in chain, add to chain
+                    chain_link_names.append(k)
+                    # add to tree:
+                    self._add_body_to_tree(k, base=False)
+        for i in self.extra_links.keys():
+            if i not in chain_link_names:
+                self._add_body_to_tree(i, base=False)
+                chain_link_names.append(i)
+
+        self.non_fixed_joint_names = self.joint_names.copy()
+        return chain_link_names
+    
+    @profiler.record_function("robot_generator/build_multi_chain")
+    def _build_multi_chain(
+        self,
+        base_link: str,
+        # arm_ee_link: str,
+        ee_links: List[str],
+        other_links: List[str],
+    ) -> List[str]:
+        """Build kinematic tree of the robot.
+
+        Args:
+            base_link: Name of base link for the chain.
+            ee_link: Name of end-effector link for the chain.
+            other_links: List of other links to add to the chain.
+
+        Returns:
+            List[str]: List of link names in the chain.
+        """
+        self._n_dofs = 0
+        self._controlled_links = []
+        self._bodies = []
+        self._name_to_idx_map = dict()
+        self.base_link = base_link
+        # self.arm_ee_link = arm_ee_link
+        # self.leg_ee_links = leg_ee_links
+        self.ee_links = ee_links
+        self.joint_names = []
+        self._fixed_transform = []
+        chain_link_names = []
+        
+        for i, ee_link in enumerate(ee_links):
+            chain = self._kinematics_parser.get_chain(base_link, ee_link)
+            if i == 0:
+                self._add_body_to_tree(chain[0], base=True)
+                chain_link_names.append(chain[0])
+            for j, l_name in enumerate(chain[1:]):
+                    self._add_body_to_tree(l_name)
+                    chain_link_names.append(l_name)
+            
+        # check if all links are in the built tree:
+
+        for i in other_links:
+            if i in self._name_to_idx_map:
+                continue
+            if i not in self.extra_links.keys():
+                print("other_links",i)
                 chain_l_names = self._kinematics_parser.get_chain(base_link, i)
 
                 for k in chain_l_names:
@@ -587,6 +727,25 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
             link_names: List of link names to store poses after kinematics computation.
         """
         chain_link_names = self._build_chain(base_link, ee_link, other_links)
+        self._build_kinematics_tensors(base_link, link_names, chain_link_names)
+        if self.collision_spheres is not None and len(self.collision_link_names) > 0:
+            self._build_collision_model(
+                self.collision_spheres, self.collision_link_names, self.collision_sphere_buffer
+            )
+            
+    @profiler.record_function("robot_generator/build_multi_chain_kinematics")
+    def _build_multi_chain_kinematics(
+        self, base_link: str, ee_links: List[str], other_links: List[str], link_names: List[str]
+    ):
+        """Build kinematics tensors given base link, end-effector link and other links.
+
+        Args:
+            base_link: Name of base link for the kinematic tree.
+            ee_link: Name of end-effector link for the kinematic tree.
+            other_links: List of other links to add to the kinematic tree.
+            link_names: List of link names to store poses after kinematics computation.
+        """
+        chain_link_names = self._build_multi_chain(base_link, ee_links, other_links)
         self._build_kinematics_tensors(base_link, link_names, chain_link_names)
         if self.collision_spheres is not None and len(self.collision_link_names) > 0:
             self._build_collision_model(
@@ -726,6 +885,139 @@ class CudaRobotGenerator(CudaRobotGeneratorConfig):
                 position=l_val, joint_names=list(self.lock_joints.keys())
             )
 
+    @profiler.record_function("robot_generator/build_multi_kinematics_with_lock_joints")
+    def _build_multi_kinematics_with_lock_joints(
+        self,
+        base_link: str,
+        ee_links: List[str],
+        other_links: List[str],
+        link_names: List[str],
+        lock_joints: Dict[str, float],
+    ):
+        """Build kinematics with locked joints.
+
+        This function will first build the chain with no locked joints, find the transforms
+        when the locked joints are set to the given values, and then use these transforms as
+        fixed transforms for the locked joints.
+
+        Args:
+            base_link: Base link of the kinematic tree.
+            ee_link: End-effector link of the kinematic tree.
+            other_links: Other links to add to the kinematic tree.
+            link_names: List of link names to store poses after kinematics computation.
+            lock_joints: Joints to lock in the kinematic tree with value to lock at.
+        """
+        chain_link_names = self._build_multi_chain(base_link, ee_links, other_links)
+        # find links attached to lock joints:
+        lock_joint_names = list(lock_joints.keys())
+
+        joint_data = self._get_joint_links(lock_joint_names)
+
+        lock_links = list(
+            [joint_data[j]["parent"] for j in joint_data.keys()]
+            + [joint_data[j]["child"] for j in joint_data.keys()]
+        )
+
+        for k in lock_joint_names:
+            if "mimic" in joint_data[k]:
+                mimic_link_names = [[x["parent"], x["child"]] for x in joint_data[k]["mimic"]]
+                mimic_link_names = [x for xs in mimic_link_names for x in xs]
+                lock_links += mimic_link_names
+        lock_links = list(set(lock_links))
+
+        new_link_names = list(set(link_names + lock_links))
+
+        # rebuild kinematic tree with link names added to link pose computation:
+        self._build_kinematics_tensors(base_link, new_link_names, chain_link_names)
+        if self.collision_spheres is not None and len(self.collision_link_names) > 0:
+            self._build_collision_model(
+                self.collision_spheres, self.collision_link_names, self.collision_sphere_buffer
+            )
+        # do forward kinematics and get transform for locked joints:
+        q = torch.zeros(
+            (1, self._n_dofs), device=self.tensor_args.device, dtype=self.tensor_args.dtype
+        )
+        # set lock joints in the joint angles:
+        l_idx = torch.as_tensor(
+            [self.joint_names.index(l) for l in lock_joints.keys()],
+            dtype=torch.long,
+            device=self.tensor_args.device,
+        )
+        l_val = self.tensor_args.to_device([lock_joints[l] for l in lock_joints.keys()])
+
+        q[0, l_idx] = l_val
+        kinematics_config = KinematicsTensorConfig(
+            fixed_transforms=self._fixed_transform,
+            link_map=self._link_map,
+            joint_map=self._joint_map,
+            joint_map_type=self._joint_map_type,
+            joint_offset_map=self._joint_offset_map,
+            store_link_map=self._store_link_map,
+            link_chain_map=self._link_chain_map,
+            link_names=self.link_names,
+            link_spheres=self._link_spheres_tensor,
+            link_sphere_idx_map=self._link_sphere_idx_map,
+            n_dof=self._n_dofs,
+            joint_limits=self._joint_limits,
+            non_fixed_joint_names=self.non_fixed_joint_names,
+            total_spheres=self.total_spheres,
+        )
+        link_poses = self._get_link_poses(q, lock_links, kinematics_config)
+        # remove lock links from store map:
+        store_link_map = [chain_link_names.index(l) for l in link_names]
+        self._store_link_map = torch.as_tensor(
+            store_link_map, device=self.tensor_args.device, dtype=torch.int16
+        )
+        self.link_names = link_names
+        # compute a fixed transform for fixing joints:
+        with profiler.record_function("cuda_robot_generator/fix_locked_joints"):
+            # convert tensors to cpu:
+            self._joint_map_type = self._joint_map_type.to(device=self.cpu_tensor_args.device)
+            self._joint_map = self._joint_map.to(device=self.cpu_tensor_args.device)
+
+            for j in lock_joint_names:
+                w_parent = lock_links.index(joint_data[j]["parent"])
+                w_child = lock_links.index(joint_data[j]["child"])
+                parent_t_child = (
+                    link_poses.get_index(0, w_parent)
+                    .inverse()
+                    .multiply(link_poses.get_index(0, w_child))
+                )
+                # Make this joint as fixed
+                i = joint_data[j]["link_index"]
+                self._fixed_transform[i] = parent_t_child.get_matrix()
+
+                if "mimic" in joint_data[j]:
+                    for mimic_joint in joint_data[j]["mimic"]:
+                        w_parent = lock_links.index(mimic_joint["parent"])
+                        w_child = lock_links.index(mimic_joint["child"])
+                        parent_t_child = (
+                            link_poses.get_index(0, w_parent)
+                            .inverse()
+                            .multiply(link_poses.get_index(0, w_child))
+                        )
+                        i_q = mimic_joint["link_index"]
+                        self._fixed_transform[i_q] = parent_t_child.get_matrix()
+                        self._controlled_links.remove(i_q)
+                        self._joint_map_type[i_q] = -1
+                        self._joint_map[i_q] = -1
+
+                i = joint_data[j]["link_index"]
+                self._joint_map_type[i] = -1
+                self._joint_map[i:] -= 1
+                self._joint_map[i] = -1
+                self._controlled_links.remove(i)
+                self.joint_names.remove(j)
+                self._n_dofs -= 1
+                self._active_joints.remove(i)
+            self._joint_map[self._joint_map < -1] = -1
+            self._joint_map = self._joint_map.to(device=self.tensor_args.device)
+            self._joint_map_type = self._joint_map_type.to(device=self.tensor_args.device)
+        if len(self.lock_joints.keys()) > 0:
+            self.lock_jointstate = JointState(
+                position=l_val, joint_names=list(self.lock_joints.keys())
+            )
+    
     @profiler.record_function("robot_generator/build_collision_model")
     def _build_collision_model(
         self,

@@ -63,6 +63,18 @@ class RobotConfig:
             cuda_robot_model_config,
             tensor_args=tensor_args,
         )
+        
+    @staticmethod
+    def from_basic_with_multi_ee(urdf_path, base_link, ee_links, tensor_args=TensorDeviceType()):
+        print("from_basic ee_links", ee_links)
+        cuda_robot_model_config = CudaRobotModelConfig.from_basic_urdf_with_multi_ee(
+            urdf_path, base_link, ee_links, tensor_args
+        )
+
+        return RobotConfig(
+            cuda_robot_model_config,
+            tensor_args=tensor_args,
+        )
 
     def write_config(self, file_path):
         dictionary = vars(self)

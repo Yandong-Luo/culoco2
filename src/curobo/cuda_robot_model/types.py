@@ -454,6 +454,9 @@ class KinematicsTensorConfig:
 
     #: Name of end-effector link for which the Cartesian pose will be computed.
     ee_link: str = "ee_link"
+    
+    ee_links: Optional[str] = None
+    multi_ee_idx: Optional[List[int]] = None
 
     #: A copy of link spheres that is used as reference, in case the link_spheres get modified at
     #: runtime.
@@ -514,6 +517,10 @@ class KinematicsTensorConfig:
         if self.lock_jointstate is not None and new_config.lock_jointstate is not None:
             self.lock_jointstate.copy_(new_config.lock_jointstate)
         self.mimic_joints = new_config.mimic_joints
+        
+        if isinstance(new_config, KinematicsTensorConfig):
+            self.multi_ee_idx = new_config.multi_ee_idx
+            self.ee_links = new_config.ee_links
 
         return self
 

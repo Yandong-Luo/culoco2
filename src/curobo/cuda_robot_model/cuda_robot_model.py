@@ -19,7 +19,7 @@ of the forward kinematics function.
 from __future__ import annotations
 
 # Standard Library
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 # Third Party
@@ -122,6 +122,27 @@ class CudaRobotModelConfig:
             CudaRobotModelConfig: cuda robot model configuration.
         """
         config = CudaRobotGeneratorConfig(base_link, ee_link, tensor_args, urdf_path=urdf_path)
+        return CudaRobotModelConfig.from_config(config)
+    
+    @staticmethod
+    def from_basic_urdf_with_multi_ee(
+        urdf_path: str,
+        base_link: str,
+        ee_links: List[str],
+        tensor_args: TensorDeviceType = TensorDeviceType(),
+    ) -> CudaRobotModelConfig:
+        """Load a cuda robot model from only urdf. This does not support collision queries.
+
+        Args:
+            urdf_path : Path of urdf file.
+            base_link : Name of base link.
+            ee_links : Name of all end-effector link.
+            tensor_args : Device to load robot model. Defaults to TensorDeviceType().
+
+        Returns:
+            CudaRobotModelConfig: cuda robot model configuration.
+        """
+        config = CudaRobotGeneratorConfig(base_link, ee_links=ee_links, tensor_args=tensor_args, urdf_path=urdf_path)
         return CudaRobotModelConfig.from_config(config)
 
     @staticmethod
@@ -274,11 +295,14 @@ class CudaRobotModelState:
 
     #: End-effector position stored as x,y,z in meters [b, 3]. End-effector is defined by
     #: :attr:`CudaRobotModel.ee_link`.
-    ee_position: torch.Tensor
+    ee_position: Optional[torch.Tensor] = None
 
     #: End-effector orientaiton stored as quaternion qw, qx, qy, qz [b,4]. End-effector is defined
     #: by :attr:`CudaRobotModel.ee_link`.
-    ee_quaternion: torch.Tensor
+    ee_quaternion: Optional[torch.Tensor] = None
+    
+    all_ee_position: List[torch.Tensor] = field(default_factory=list)
+    all_ee_quaternion: List[torch.Tensor] = field(default_factory=list)
 
     #: Linear Jacobian. Currently not supported.
     lin_jacobian: Optional[torch.Tensor] = None
@@ -304,6 +328,13 @@ class CudaRobotModelState:
     def ee_pose(self) -> Pose:
         """Get end-effector pose as a Pose object."""
         return Pose(self.ee_position, self.ee_quaternion)
+    
+    @property
+    def all_ee_pos(self) -> List[Pose]:
+        result = []
+        for ee_pos, ee_qua in zip(self.all_ee_position, self.all_ee_quaternion):
+            result.append(Pose(ee_pos, ee_qua))
+        return result
 
     def get_link_spheres(self) -> torch.Tensor:
         """Get spheres representing robot geometry as a tensor with [batch,4],  [x,y,z,radius]."""
@@ -457,6 +488,87 @@ class CudaRobotModel(CudaRobotModelConfig):
             link_quat_seq,
             link_spheres_tensor,
         )
+        
+    @profiler.record_function("cuda_robot_model/multi_ee_forward_kinematics")
+    def multi_ee_forward(
+        self, q, link_name=None, calculate_jacobian=False
+    ) -> Tuple[List[Tensor], List[Tensor], None, None, Tensor, Tensor, Tensor]:
+        """Compute forward kinematics of the robot.
+
+        Use :func:`~get_state` to get a structured output.
+
+        Args:
+            q: Joint configuration of the robot. Shape should be [batch_size, dof].
+            link_name: Name of link to return pose of. If None, returns end-effector pose.
+            calculate_jacobian: Calculate jacobian of the robot. Not supported.
+
+        Returns:
+            Tuple[Tensor, Tensor, None, None, Tensor, Tensor, Tensor]: End-effector position,
+            end-effector quaternion (wxyz), linear jacobian(None), angular jacobian(None),
+            link positions, link quaternion (wxyz), link spheres.
+        """
+        if len(q.shape) > 2:
+            log_error("q shape should be [batch_size, dof]")
+        if len(q.shape) == 1:
+            q = q.unsqueeze(0)
+        batch_size = q.shape[0]
+        self.update_batch_size(batch_size, force_update=q.requires_grad)
+        # print("q",q)
+        # do fused forward:
+        link_pos_seq, link_quat_seq, link_spheres_tensor = self._cuda_forward(q)
+        
+        # print("link_pos_seq", link_pos_seq)
+        
+        # print(self.link_names)
+        
+        all_ee_pos = []
+        all_ee_quat = []
+        
+        all_link_idx = self.kinematics_config.multi_ee_idx
+        for ee_link_idx in all_link_idx:
+            ee_pos = link_pos_seq.contiguous()[..., ee_link_idx, :]
+            ee_quat = link_quat_seq.contiguous()[..., ee_link_idx, :]
+            
+            all_ee_pos.append(ee_pos)
+            all_ee_quat.append(ee_quat)
+        lin_jac = ang_jac = None
+        
+        return (
+            all_ee_pos,
+            all_ee_quat,
+            lin_jac,
+            ang_jac,
+            link_pos_seq,
+            link_quat_seq,
+            link_spheres_tensor,
+        )
+        
+    def get_state_with_mutli_ee(
+        self, q: torch.Tensor, link_name: str = None, calculate_jacobian: bool = False
+    ) -> CudaRobotModelState:
+        """Get kinematic state of the robot by computing forward kinematics.
+
+        Args:
+            q: Joint configuration of the robot. Shape should be [batch_size, dof].
+            link_name: Name of link to return pose of. If None, returns end-effector pose.
+            calculate_jacobian: Calculate jacobian of the robot. Not supported.
+
+        Returns:
+            CudaLocoRobotModelState: Kinematic state of the robot.
+        """
+        out = self.forward(q, link_name, calculate_jacobian)
+        # print(out[6])
+        state = CudaRobotModelState(
+            all_ee_position=out[0],
+            all_ee_quaternion=out[1],
+            lin_jacobian=None,
+            ang_jacobian=None,
+            links_position=out[4],
+            links_quaternion=out[5],
+            link_spheres_tensor=out[6],
+            link_names=self.link_names,
+        )
+        return state
 
     def get_state(
         self, q: torch.Tensor, link_name: str = None, calculate_jacobian: bool = False
@@ -588,6 +700,47 @@ class CudaRobotModel(CudaRobotModelConfig):
             List[Sphere]: List of all robot spheres.
         """
         state = self.get_state(q)
+
+        # state has sphere position and radius
+
+        sph_all = state.get_link_spheres().cpu().numpy()
+
+        sph_traj = []
+        for j in range(sph_all.shape[0]):
+            sph = sph_all[j, :, :]
+            if filter_valid:
+                sph_list = [
+                    Sphere(
+                        name="robot_curobo_sphere_" + str(i),
+                        pose=[sph[i, 0], sph[i, 1], sph[i, 2], 1, 0, 0, 0],
+                        radius=sph[i, 3],
+                    )
+                    for i in range(sph.shape[0])
+                    if (sph[i, 3] > 0.0)
+                ]
+            else:
+                sph_list = [
+                    Sphere(
+                        name="robot_curobo_sphere_" + str(i),
+                        pose=[sph[i, 0], sph[i, 1], sph[i, 2], 1, 0, 0, 0],
+                        radius=sph[i, 3],
+                    )
+                    for i in range(sph.shape[0])
+                ]
+            sph_traj.append(sph_list)
+        return sph_traj
+    
+    def get_robot_with_multi_ee_as_spheres(self, q: torch.Tensor, filter_valid: bool = True) -> List[Sphere]:
+        """Get robot spheres using forward kinematics on given joint configuration q.
+
+        Args:
+            q: Joint configuration of the robot, shape should be [1, dof].
+            filter_valid: Filter out spheres with radius <= 0.
+
+        Returns:
+            List[Sphere]: List of all robot spheres.
+        """
+        state = self.get_state_with_mutli_ee(q)
 
         # state has sphere position and radius
 
