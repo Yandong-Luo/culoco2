@@ -18,8 +18,8 @@ import torch
 from curobo.geom.types import WorldConfig
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
-from culoco.types.robot import RobotConfig
-from culoco.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
+from curobo.types.robot import RobotConfig
+from curobo.util_file import get_robot_configs_path, get_world_configs_path, join_path, load_yaml
 from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
 
 torch.backends.cudnn.benchmark = True

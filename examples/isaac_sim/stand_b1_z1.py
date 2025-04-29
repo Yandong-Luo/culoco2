@@ -205,7 +205,7 @@ from curobo.types.robot import JointState
 from curobo.types.state import JointState
 from curobo.util.logger import log_error, setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
-from culoco.util_file import (
+from curobo.util_file import (
     get_assets_path,
     get_filename,
     get_path_of_dir,
@@ -215,10 +215,10 @@ from culoco.util_file import (
     get_robot_path,
 )
 
-# from culoco.util_file import get_robot_path, join_path, load_yaml, get_assets_path
-from culoco.cuda_loco_robot_model.cuda_robot_model import CudaLocoRobotModel
+# from curobo.util_file import get_robot_path, join_path, load_yaml, get_assets_path
+from curobo.cuda_loco_robot_model.cuda_robot_model import CudaLocoRobotModel
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-from culoco.types.robot import RobotConfig
+from curobo.types.robot import RobotConfig
 
 from curobo.util_file import (
     get_world_configs_path,
@@ -466,7 +466,7 @@ def main():
                 # create spheres:
                 for si, s in enumerate(sph_list[0]):
                     sp = sphere.VisualSphere(
-                        prim_path="/culoco/robot_sphere_" + str(si),
+                        prim_path="/curobo/robot_sphere_" + str(si),
                         position=np.ravel(s.position),
                         radius=float(s.radius),
                         color=np.array([0, 0.8, 0.2]),

@@ -203,9 +203,9 @@ from curobo.geom.types import WorldConfig
 # from curobo.types.math import Pose
 # from curobo.types.robot import JointState
 # from curobo.types.state import JointState
-# from culoco.util.logger import log_error, setup_culoco_logger
+# from curobo.util.logger import log_error, setup_curobo_logger
 from curobo.util.usd_helper import UsdHelper
-from culoco.util_file import (
+from curobo.util_file import (
     get_assets_path,
     get_filename,
     get_path_of_dir,

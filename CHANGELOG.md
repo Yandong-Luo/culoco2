@@ -33,3 +33,7 @@ All notable changes to this project will be documented in this file.
 ## [0.0.8] - 2024-04-28
 ### Changed
 - Yandong Luo: Comparing with Pinocchio's result, the correctness of go2 forward kinematic is verified.
+
+## [0.0.9] - 2024-04-29
+### Changed
+- Yandong Luo: Remove all culoco dependence
