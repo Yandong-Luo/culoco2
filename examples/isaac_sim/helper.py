@@ -167,6 +167,8 @@ def add_robot_to_scene(
     robot_prim = robot_p.prim
     stage = robot_prim.GetStage()
     linkp = stage.GetPrimAtPath(robot_path)
+    print("robot_path",robot_path)
+    print("linkp",linkp)
     set_prim_transform(linkp, [position[0], position[1], position[2], 1, 0, 0, 0])
 
     robot = my_world.scene.add(robot_p)

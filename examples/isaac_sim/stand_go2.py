@@ -133,6 +133,18 @@ from scipy.spatial.transform import Rotation as R
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
 from curobo.types.robot import RobotConfig
 
+from omni.isaac.sensor import ContactSensor
+from pxr import UsdPhysics, PhysxSchema
+import numpy as np
+
+from helper import set_prim_transform
+
+import omni.kit.commands
+from pxr import Gf
+from isaacsim.sensors.physics import _sensor
+
+# from omni.isaac.core.utils.transformations import create_transform_node
+
 ############################################################
 
 
@@ -246,6 +258,26 @@ def main():
     kin_model = None
     kin_model = CudaRobotModel(robot_cfg.kinematics)
 
+    foot_names = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+    contact_sensors = []
+    for foot_name in foot_names:
+        # Construct proper prim path for each foot
+        foot_path = f"{robot_prim_path}/{foot_name}"
+        sensor_path = f"{robot_prim_path}/{foot_name}/contact_sensor"
+        
+        # Create contact sensor
+        sensor = ContactSensor(
+            prim_path=sensor_path,
+            name=f"{foot_name}_contact_sensor",
+            frequency=60,
+            min_threshold=0,
+            max_threshold=10000000,
+            radius=0.022,
+            translation=np.array([0, 0, -0.022])  # Position at the bottom of the foot
+        )
+        
+        contact_sensors.append(sensor)
+
     # plan_config = MotionGenPlanConfig(
     #     enable_graph=False,
     #     enable_graph_attempt=2,
@@ -310,6 +342,19 @@ def main():
 
         # position and orientation of target virtual cube:
         cube_position, cube_orientation = target.get_world_pose()
+        
+        # _contact_sensor_interface = _sensor.acquire_contact_sensor_interface()
+        # for foot_name in ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]:
+        #     sensor_prim_path = f"/World/sensors/{foot_name}_contact_sensor"
+        #     # foot_path = f"/World/go2_description/{foot_name}"
+        # # for contact_path in contact_sensors:
+        #     contact_data = _contact_sensor_interface.get_sensor_reading(sensor_prim_path, use_latest_data = True)
+        #     print(type(contact_data))
+        #     print(foot_name, contact_data.value)
+        
+        for foot_name, sensor in zip(foot_names, contact_sensors):
+            value = sensor.get_current_frame()
+            print(foot_name, value)
 
         # if past_pose is None:
         #     past_pose = cube_position

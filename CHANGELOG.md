@@ -37,3 +37,7 @@ All notable changes to this project will be documented in this file.
 ## [0.0.9] - 2024-04-29
 ### Changed
 - Yandong Luo: Remove all culoco dependence
+
+## [0.0.10] - 2024-04-29
+### Changed
+- Yandong Luo: add contact sensor for each leg and get the contact data.
